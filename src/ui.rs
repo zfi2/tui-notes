@@ -67,11 +67,7 @@ fn generate_help_text(app: &App, config: &Config) -> String {
                 format_keybinding(&kb.delete_note),
                 format_keybinding(&kb.quit)
             );
-            if config.behavior.encryption_enabled {
-                format!("{} | {}: Export Backup", base_help, format_keybinding(&kb.export_plaintext))
-            } else {
-                base_help
-            }
+            format!("{} | {}: Export Backup", base_help, format_keybinding(&kb.export_plaintext))
         }
         AppMode::Searching => {
             format!("Type to search | {}: Navigate Results | {}/{}: View Selected | {}: Exit Search | {}: Quit",
