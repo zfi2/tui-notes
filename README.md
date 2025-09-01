@@ -40,9 +40,8 @@ tui-notes
 
 A default configuration file is created on the first start-up.
 The configuration file is located in `~/.config/tui-notes/config.toml`.
-See `config.example.toml` for what you can change.
 
-## Keys
+## Default Keys
 
 **Note list:**
 - Up/Down: navigate
@@ -91,3 +90,6 @@ Notes are stored in JSON (optionally encrypted), because it's simple and you can
 
 ### Note Menu
 ![Note Menu](screenshots/note_menu.png)
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
