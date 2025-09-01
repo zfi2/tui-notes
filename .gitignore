@@ -1,2 +1,6 @@
+target/
+
+notes.json
 Cargo.lock
 TODO.md
+

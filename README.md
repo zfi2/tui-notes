@@ -77,3 +77,17 @@ I wanted something fast that works in the terminal and doesn't have a thousand f
 ## Storage
 
 Notes are stored in JSON (optionally encrypted), because it's simple and you can read it without this app if you need to.
+
+## Screenshots
+
+### Unlock Notes
+![Unlock Notes](screenshots/unlock_notes.png)
+
+### Encryption Prompt
+![Encryption Prompt](screenshots/encryption_prompt.png)
+
+### Main Menu
+![Main Menu](screenshots/main_menu.png)
+
+### Note Menu
+![Note Menu](screenshots/note_menu.png)
