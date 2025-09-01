@@ -40,7 +40,6 @@ tui-notes
 
 A default configuration file is created on the first start-up.
 The configuration file is located in `~/.config/tui-notes/config.toml`.
-See `config.example.toml` for what you can change.
 
 ## Keys
 
