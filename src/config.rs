@@ -130,6 +130,7 @@ pub struct Behavior {
     pub show_line_numbers: bool,
     pub highlighting_enabled: bool,
     pub encryption_enabled: bool,
+    pub use_native_dialog: bool,
 }
 
 impl Default for Config {
@@ -210,6 +211,7 @@ impl Default for Behavior {
             show_line_numbers: false,
             highlighting_enabled: true,
             encryption_enabled: false,
+            use_native_dialog: true,
         }
     }
 }

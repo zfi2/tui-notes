@@ -19,6 +19,7 @@ pub enum AppMode {
     ConfirmingDelete,
     ConfirmingUnsavedExit,
     ConfirmingExport,
+    SelectingExportLocation,
     EncryptedFileWarning,
 }
 
@@ -50,6 +51,8 @@ pub struct App {
     pub password_input: SecretString,
     pub password_error: Option<String>,
     pub password_limit_reached: bool,
+    pub export_file_input: String,
+    pub export_cursor_position: usize,
 }
 
 impl App {
@@ -115,6 +118,8 @@ impl App {
             password_input: SecretString::new("".into()),
             password_error: None,
             password_limit_reached: false,
+            export_file_input: String::new(),
+            export_cursor_position: 0,
         })
     }
 
@@ -162,6 +167,7 @@ impl App {
             AppMode::ConfirmingDelete => self.handle_delete_confirmation_input(key, config),
             AppMode::ConfirmingUnsavedExit => self.handle_unsaved_exit_confirmation_input(key, config),
             AppMode::ConfirmingExport => self.handle_export_confirmation_input(key, config),
+            AppMode::SelectingExportLocation => self.handle_export_location_input(key, config),
             AppMode::EncryptedFileWarning => self.handle_encrypted_file_warning_input(key, config),
         }
     }
@@ -403,29 +409,56 @@ impl App {
         Ok(())
     }
 
-    fn handle_export_confirmation_input(&mut self, key: KeyEvent, _config: &Config) -> io::Result<()> {
+    fn handle_export_confirmation_input(&mut self, key: KeyEvent, config: &Config) -> io::Result<()> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.mode = AppMode::NoteList;
-                
-                // generate default filename with timestamp
+                // Generate default filename with timestamp
                 let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
                 let default_filename = format!("notes_backup_{}.json", timestamp);
                 
-                // try to use native file dialog or fall back to export with default name
-                if let Some(file_path) = rfd::FileDialog::new()
-                    .set_title("Export Notes Backup")
-                    .set_file_name(&default_filename)
-                    .add_filter("JSON files", &["json"])
-                    .add_filter("All files", &["*"])
-                    .save_file()
-                {
-                    if let Err(e) = self.note_manager.export_plaintext(&file_path) {
-                        // TODO: show error message in UI
-                        eprintln!("Export failed: {}", e);
+                if config.behavior.use_native_dialog {
+                    // Try to use native file dialog first
+                    match std::panic::catch_unwind(|| {
+                        rfd::FileDialog::new()
+                            .set_title("Export Notes Backup")
+                            .set_file_name(&default_filename)
+                            .add_filter("JSON files", &["json"])
+                            .add_filter("All files", &["*"])
+                            .save_file()
+                    }) {
+                        Ok(Some(file_path)) => {
+                            // Native dialog succeeded and user selected a path
+                            if let Err(e) = self.note_manager.export_plaintext(&file_path) {
+                                // TODO: Show error message in UI
+                                eprintln!("Export failed: {}", e);
+                            }
+                            self.mode = AppMode::NoteList;
+                        }
+                        Ok(None) => {
+                            // Native dialog succeeded but user cancelled
+                            self.mode = AppMode::NoteList;
+                        }
+                        Err(_) => {
+                            // Native dialog failed (e.g., no GUI, missing dependencies)
+                            // Fall back to terminal input with home directory as default
+                            self.mode = AppMode::SelectingExportLocation;
+                            
+                            let home_dir = dirs::home_dir()
+                                .unwrap_or_else(|| std::path::PathBuf::from("."));
+                            let default_path = home_dir.join(&default_filename);
+                            self.export_file_input = default_path.to_string_lossy().to_string();
+                            self.export_cursor_position = self.export_file_input.len();
+                        }
                     }
                 } else {
-                    // user cancelled the dialog - do nothing
+                    // User prefers terminal dialog - go directly to terminal input
+                    self.mode = AppMode::SelectingExportLocation;
+                    
+                    let home_dir = dirs::home_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let default_path = home_dir.join(&default_filename);
+                    self.export_file_input = default_path.to_string_lossy().to_string();
+                    self.export_cursor_position = self.export_file_input.len();
                 }
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -436,6 +469,59 @@ impl App {
         Ok(())
     }
 
+    fn handle_export_location_input(&mut self, key: KeyEvent, _config: &Config) -> io::Result<()> {
+        match key.code {
+            KeyCode::Enter => {
+                if !self.export_file_input.trim().is_empty() {
+                    if let Err(e) = self.note_manager.export_plaintext(&self.export_file_input) {
+                        // TODO: Show error message in UI
+                        eprintln!("Export failed: {}", e);
+                    }
+                    self.export_file_input.clear();
+                    self.export_cursor_position = 0;
+                    self.mode = AppMode::NoteList;
+                }
+            }
+            KeyCode::Esc => {
+                self.export_file_input.clear();
+                self.export_cursor_position = 0;
+                self.mode = AppMode::NoteList;
+            }
+            KeyCode::Backspace => {
+                if self.export_cursor_position > 0 {
+                    self.export_file_input.remove(self.export_cursor_position - 1);
+                    self.export_cursor_position -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                if self.export_cursor_position < self.export_file_input.len() {
+                    self.export_file_input.remove(self.export_cursor_position);
+                }
+            }
+            KeyCode::Left => {
+                if self.export_cursor_position > 0 {
+                    self.export_cursor_position -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.export_cursor_position < self.export_file_input.len() {
+                    self.export_cursor_position += 1;
+                }
+            }
+            KeyCode::Home => {
+                self.export_cursor_position = 0;
+            }
+            KeyCode::End => {
+                self.export_cursor_position = self.export_file_input.len();
+            }
+            KeyCode::Char(c) => {
+                self.export_file_input.insert(self.export_cursor_position, c);
+                self.export_cursor_position += 1;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 
     fn handle_editor_input(&mut self, key: KeyEvent, config: &Config) -> io::Result<()> {
         let kb = &config.keybindings;

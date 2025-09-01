@@ -131,7 +131,14 @@ fn generate_help_text(app: &App, config: &Config) -> String {
             )
         }
         AppMode::ConfirmingExport => {
-            "Y/y: Confirm Export (opens file dialog) | N/n/Esc: Cancel".to_string()
+            if config.behavior.use_native_dialog {
+                "Y/y: Confirm Export (native dialog, fallback to terminal) | N/n/Esc: Cancel".to_string()
+            } else {
+                "Y/y: Confirm Export (terminal dialog) | N/n/Esc: Cancel".to_string()
+            }
+        }
+        AppMode::SelectingExportLocation => {
+            "Type file path for backup export | Enter: Export | Esc: Cancel | ←/→: Move cursor | Home/End: Jump".to_string()
         }
         AppMode::EncryptedFileWarning => {
             "Your notes file is encrypted, but encryption is disabled in config | Esc/q: Quit".to_string()
@@ -217,6 +224,10 @@ pub fn draw(f: &mut Frame, app: &mut App, config: &Config) {
         AppMode::ConfirmingExport => {
             draw_note_list(f, chunks[1], app, config);
             draw_export_confirmation(f, f.area(), app, config);
+        }
+        AppMode::SelectingExportLocation => {
+            draw_note_list(f, chunks[1], app, config);
+            draw_export_location_dialog(f, f.area(), app, config);
         }
         AppMode::EncryptedFileWarning => {
             draw_encrypted_file_warning(f, chunks[1], app, config);
@@ -862,3 +873,56 @@ fn draw_export_confirmation(f: &mut Frame, area: Rect, _app: &App, config: &Conf
     f.render_widget(dialog, dialog_area);
 }
 
+fn draw_export_location_dialog(f: &mut Frame, area: Rect, app: &App, config: &Config) {
+    let dialog_width = 80.min(area.width - 4);
+    let dialog_height = 9;
+    let dialog_x = (area.width.saturating_sub(dialog_width)) / 2;
+    let dialog_y = (area.height.saturating_sub(dialog_height)) / 2;
+    
+    let dialog_area = Rect {
+        x: dialog_x,
+        y: dialog_y,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    f.render_widget(Clear, dialog_area);
+
+    let (title, subtitle) = if config.behavior.use_native_dialog {
+        ("Export Location (Fallback)", "(Native file dialog failed, using fallback)")
+    } else {
+        ("Export Location", "(Terminal mode - configured in settings)")
+    };
+
+    let content = vec![
+        Line::from("Choose export location:"),
+        Line::from(subtitle),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(config.colors.text.to_color())),
+            Span::styled(&app.export_file_input, Style::default().fg(config.colors.text.to_color())),
+        ]),
+        Line::from(""),
+        Line::from("Press Enter to export, Esc to cancel"),
+        Line::from("Use ←/→ to move cursor, Home/End to jump"),
+    ];
+
+    let dialog = Paragraph::new(content)
+        .style(Style::default().fg(config.colors.text.to_color()))
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(config.colors.border_active.to_color()))
+                .style(Style::default().bg(config.colors.background_selected.to_bg_color())),
+        );
+
+    f.render_widget(dialog, dialog_area);
+
+    // Set cursor position (accounting for the dialog border and prompt)
+    let max_cursor_x = dialog_area.width.saturating_sub(4); // leave space for borders and prompt
+    let cursor_x = (dialog_area.x + 3 + app.export_cursor_position as u16).min(dialog_area.x + max_cursor_x);
+    let cursor_y = dialog_area.y + 4; // line with the input
+    f.set_cursor_position((cursor_x, cursor_y));
+}
