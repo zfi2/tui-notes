@@ -57,7 +57,7 @@ fn generate_help_text(app: &App, config: &Config) -> String {
             "Create a password for your new encrypted notes vault | Esc: Quit".to_string()
         }
         AppMode::NoteList => {
-            format!("{}: Navigate | {}: View | {}: Edit | {}: New Note | {}: Search | {}: Pin | {}: Delete | {}: Quit",
+            let base_help = format!("{}: Navigate | {}: View | {}: Edit | {}: New Note | {}: Search | {}: Pin | {}: Delete | {}: Quit",
                 format!("{}/{}", format_keybinding(&kb.move_up), format_keybinding(&kb.move_down)),
                 format_keybinding(&kb.view_note),
                 format_keybinding(&kb.edit_note),
@@ -66,7 +66,12 @@ fn generate_help_text(app: &App, config: &Config) -> String {
                 format_keybinding(&kb.toggle_pin),
                 format_keybinding(&kb.delete_note),
                 format_keybinding(&kb.quit)
-            )
+            );
+            if config.behavior.encryption_enabled {
+                format!("{} | {}: Export Backup", base_help, format_keybinding(&kb.export_plaintext))
+            } else {
+                base_help
+            }
         }
         AppMode::Searching => {
             format!("Type to search | {}: Navigate Results | {}/{}: View Selected | {}: Exit Search | {}: Quit",
@@ -124,6 +129,9 @@ fn generate_help_text(app: &App, config: &Config) -> String {
                 format_keybinding_vec(&kb.discard_and_exit),
                 format_keybinding_vec(&kb.cancel_exit)
             )
+        }
+        AppMode::EncryptedFileWarning => {
+            "Your notes file is encrypted, but encryption is disabled in config | Esc/q: Quit".to_string()
         }
     }
 }
@@ -202,6 +210,9 @@ pub fn draw(f: &mut Frame, app: &mut App, config: &Config) {
         AppMode::ConfirmingUnsavedExit => {
             draw_editor(f, chunks[1], app, config);
             draw_unsaved_changes_confirmation(f, f.area(), app, config);
+        }
+        AppMode::EncryptedFileWarning => {
+            draw_encrypted_file_warning(f, chunks[1], app, config);
         }
     }
     
@@ -767,4 +778,42 @@ fn draw_password_setup(f: &mut Frame, area: Rect, app: &App, config: &Config) {
     let cursor_x = password_area[1].x + 3 + app.password_input.expose_secret().len() as u16;
     let cursor_y = password_area[1].y + 4;
     f.set_cursor_position((cursor_x, cursor_y));
+}
+
+fn draw_encrypted_file_warning(f: &mut Frame, area: Rect, _app: &App, config: &Config) {
+    let dialog_width = 80.min(area.width - 4);
+    let dialog_height = 12;
+    let dialog_x = (area.width.saturating_sub(dialog_width)) / 2;
+    let dialog_y = (area.height.saturating_sub(dialog_height)) / 2;
+    
+    let dialog_area = Rect {
+        x: dialog_x,
+        y: dialog_y,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    f.render_widget(Clear, dialog_area);
+
+    let warning_text = "⚠️  ENCRYPTED FILE DETECTED  ⚠️\n\n\
+        Your notes file appears to be encrypted, but encryption is disabled in your configuration.\n\n\
+        To access your encrypted notes:\n\
+        1. Enable encryption in your config file (~/.config/tui-notes/config.toml)\n\
+        2. Set 'encryption_enabled = true' in the [behavior] section\n\
+        3. Restart the application\n\n\
+        Or use a different notes file by changing 'default_notes_file' in config.\n\n\
+        Press 'Esc' or 'q' to quit.";
+
+    let dialog = Paragraph::new(warning_text)
+        .block(
+            Block::default()
+                .title("Configuration Error")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(config.colors.delete_dialog_border.to_color()).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(config.colors.delete_dialog_border.to_bg_color())),
+        )
+        .wrap(Wrap { trim: true })
+        .style(Style::default().fg(config.colors.text.to_color()));
+
+    f.render_widget(dialog, dialog_area);
 }

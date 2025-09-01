@@ -5,6 +5,7 @@ use crate::config::{Config, key_matches_any};
 use crate::note::{Note, NoteManager};
 use tui_textarea::TextArea;
 use secrecy::{SecretString, ExposeSecret};
+use chrono::Utc;
 
 #[derive(Debug, PartialEq)]
 pub enum AppMode {
@@ -17,6 +18,7 @@ pub enum AppMode {
     CreatingNote,
     ConfirmingDelete,
     ConfirmingUnsavedExit,
+    EncryptedFileWarning,
 }
 
 #[derive(Debug, PartialEq)]
@@ -51,16 +53,31 @@ pub struct App {
 
 impl App {
     pub fn new(config: &Config) -> io::Result<Self> {
-        let note_manager = NoteManager::new(&config.behavior.default_notes_file, config.behavior.encryption_enabled)?;
+        let note_manager_result = NoteManager::new(&config.behavior.default_notes_file, config.behavior.encryption_enabled);
         
-        let mode = if config.behavior.encryption_enabled {
-            if Path::new(&config.behavior.default_notes_file).exists() {
-                AppMode::PasswordPrompt
-            } else {
-                AppMode::PasswordSetup
+        let (note_manager, mode) = match note_manager_result {
+            Ok(manager) => {
+                let mode = if config.behavior.encryption_enabled {
+                    if Path::new(&config.behavior.default_notes_file).exists() {
+                        AppMode::PasswordPrompt
+                    } else {
+                        AppMode::PasswordSetup
+                    }
+                } else {
+                    AppMode::NoteList
+                };
+                (manager, mode)
             }
-        } else {
-            AppMode::NoteList
+            Err(e) => {
+                // check if this is the encrypted file with encryption disabled error
+                if e.to_string().contains("ENCRYPTED_FILE_DETECTED") {
+                    // create an empty note manager for the warning screen
+                    let empty_manager = NoteManager::new("/dev/null", false)?;
+                    (empty_manager, AppMode::EncryptedFileWarning)
+                } else {
+                    return Err(e);
+                }
+            }
         };
         
         Ok(App {
@@ -111,6 +128,19 @@ impl App {
                 _ => {} // ignore manual save in other modes
             }
         }
+        
+        if config.keybindings.export_plaintext.matches(key.code, key.modifiers) {
+            match self.mode {
+                AppMode::NoteList => {
+                    if let Err(e) = self.export_plaintext_backup() {
+                        // TODO: Show error message in UI
+                        eprintln!("Export failed: {}", e);
+                    }
+                    return Ok(());
+                }
+                _ => {} // only allow export from note list
+            }
+        }
 
         match self.mode {
             AppMode::PasswordPrompt => self.handle_password_input(key, config),
@@ -121,6 +151,7 @@ impl App {
             AppMode::EditingNote | AppMode::CreatingNote => self.handle_editor_input(key, config),
             AppMode::ConfirmingDelete => self.handle_delete_confirmation_input(key, config),
             AppMode::ConfirmingUnsavedExit => self.handle_unsaved_exit_confirmation_input(key, config),
+            AppMode::EncryptedFileWarning => self.handle_encrypted_file_warning_input(key, config),
         }
     }
 
@@ -349,6 +380,14 @@ impl App {
             self.return_to_list();
         } else if key_matches_any(&kb.cancel_exit, key.code, key.modifiers) {
             self.mode = AppMode::EditingNote;
+        }
+        Ok(())
+    }
+
+    fn handle_encrypted_file_warning_input(&mut self, key: KeyEvent, _config: &Config) -> io::Result<()> {
+        // only allow quitting from this screen
+        if key.code == KeyCode::Esc || key.code == KeyCode::Char('q') {
+            self.should_quit = true;
         }
         Ok(())
     }
@@ -637,5 +676,11 @@ impl App {
                 all_notes.iter().find(|note| &note.id == id).copied()
             })
             .collect()
+    }
+
+    fn export_plaintext_backup(&mut self) -> io::Result<()> {
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let export_filename = format!("notes_backup_{}.json", timestamp);
+        self.note_manager.export_plaintext(export_filename)
     }
 }

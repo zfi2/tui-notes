@@ -237,6 +237,25 @@ impl NoteManager {
         Ok(())
     }
 
+    pub fn export_plaintext<P: Into<PathBuf>>(&self, export_file: P) -> io::Result<()> {
+        if !self.is_ready() {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "notes manager is not ready"));
+        }
+
+        let json = serde_json::to_string_pretty(&self.notes)?;
+        let export_path = export_file.into();
+        
+        // ensure parent directory exists
+        if let Some(parent) = export_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        
+        fs::write(&export_path, json)?;
+        Ok(())
+    }
+
     fn load_notes(&mut self) -> io::Result<()> {
         if !self.notes_file.exists() {
             return Ok(());
@@ -247,21 +266,35 @@ impl NoteManager {
             return Ok(());
         }
 
-        let json = if self.encryption_enabled {
+        let (json, needs_migration) = if self.encryption_enabled {
             if !self.encryption.is_unlocked() {
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, "encryption key not available"));
             }
             
-            let encrypted: EncryptedFile = serde_json::from_str(&content).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("failed to parse encrypted file: {}", e))
-            })?;
-            
-            let decrypted_bytes = self.encryption.decrypt(&encrypted)?;
-            String::from_utf8(decrypted_bytes).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("decrypted data is not valid utf-8: {}", e))
-            })?
+            // check if file is already encrypted
+            if EncryptionManager::is_file_encrypted(&content) {
+                let encrypted: EncryptedFile = serde_json::from_str(&content).map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidData, format!("failed to parse encrypted file: {}", e))
+                })?;
+                
+                let decrypted_bytes = self.encryption.decrypt(&encrypted)?;
+                let json = String::from_utf8(decrypted_bytes).map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidData, format!("decrypted data is not valid utf-8: {}", e))
+                })?;
+                (json, false)
+            } else {
+                // file contains unencrypted notes - load them and mark for encryption migration
+                (content, true)
+            }
         } else {
-            content
+            // check if file contains encrypted data when encryption is disabled
+            if EncryptionManager::is_file_encrypted(&content) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData, 
+                    "ENCRYPTED_FILE_DETECTED: The notes file appears to be encrypted, but encryption is disabled in config. Please enable encryption in config or use a different notes file."
+                ));
+            }
+            (content, false)
         };
 
         self.notes = serde_json::from_str(&json).map_err(|e| {
@@ -271,6 +304,12 @@ impl NoteManager {
             )
         })?;
         self.cache_dirty = true;
+        
+        // if we loaded unencrypted notes but encryption is enabled, migrate them immediately
+        if needs_migration {
+            self.save_notes()?;
+        }
+        
         Ok(())
     }
 }

@@ -70,6 +70,8 @@ pub struct KeyBindings {
     pub toggle_help: KeyBinding,
     #[serde(serialize_with = "serialize_keybinding", deserialize_with = "deserialize_keybinding")]
     pub manual_save: KeyBinding,
+    #[serde(serialize_with = "serialize_keybinding", deserialize_with = "deserialize_keybinding")]
+    pub export_plaintext: KeyBinding,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,10 +168,11 @@ impl Default for KeyBindings {
             save_and_exit_unsaved: vec![KeyBinding::new("s"), KeyBinding::new("S")],
             discard_and_exit: vec![KeyBinding::new("d"), KeyBinding::new("D")],
             cancel_exit: vec![KeyBinding::new("c"), KeyBinding::new("C"), KeyBinding::new("Esc")],
-            toggle_highlighting: KeyBinding::new("h"),
+            toggle_highlighting: KeyBinding { key: "h".to_string(), ctrl: true, alt: false, shift: false },
             toggle_pin: KeyBinding::new("p"),
             toggle_help: KeyBinding::new("F5"),
             manual_save: KeyBinding { key: "s".to_string(), ctrl: true, alt: false, shift: false },
+            export_plaintext: KeyBinding { key: "e".to_string(), ctrl: true, alt: false, shift: false },
         }
     }
 }
