@@ -58,10 +58,22 @@ impl App {
         let (note_manager, mode) = match note_manager_result {
             Ok(manager) => {
                 let mode = if config.behavior.encryption_enabled {
-                    if Path::new(&config.behavior.default_notes_file).exists() {
-                        AppMode::PasswordPrompt
+                    let notes_path = Path::new(&config.behavior.default_notes_file);
+                    if notes_path.exists() {
+                        // check if existing file is encrypted
+                        match std::fs::read_to_string(notes_path) {
+                            Ok(content) if crate::encryption::EncryptionManager::is_file_encrypted(&content) => {
+                                AppMode::PasswordPrompt // existing encrypted file
+                            }
+                            Ok(_) => {
+                                AppMode::PasswordSetup // existing unencrypted file - setup encryption
+                            }
+                            Err(_) => {
+                                AppMode::PasswordSetup // can't read file - treat as new
+                            }
+                        }
                     } else {
-                        AppMode::PasswordSetup
+                        AppMode::PasswordSetup // no file exists
                     }
                 } else {
                     AppMode::NoteList

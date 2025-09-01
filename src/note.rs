@@ -128,7 +128,11 @@ impl NoteManager {
             self.salt = Some(salt);
             self.load_notes()?;
         } else {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "file is not encrypted"));
+            // file contains unencrypted notes - migrate to encrypted format
+            let salt = EncryptionManager::generate_salt();
+            self.encryption.unlock(password, &salt)?;
+            self.salt = Some(salt.to_vec());
+            self.load_notes()?;
         }
 
         Ok(())
