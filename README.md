@@ -38,13 +38,13 @@ tui-notes
 
 ## Configuration
 
-A default configuration file is created on the first start-up.
+A default configuration file is created on the first start-up.\
 The configuration file is located in `~/.config/tui-notes/config.toml`.
 
 ## Storage
 
-Notes are stored in JSON (optionally encrypted), because it's simple, and you can read it without this app if you need to.
-You may change the notes path in the configuration file, **by default, the program saves notes in the same directory as the configuration file**.
+Notes are stored in JSON (optionally encrypted), because it's simple, and you can read it without this app if you need to.\
+You may change the notes path in the configuration file, **by default, the program saves notes in the same directory as the configuration file**.\
 You may configure it to use an absolute path, such as: `default_notes_file = "/home/user/Desktop/notes.json"`
 
 ## Default Keys
