@@ -36,6 +36,11 @@ sudo cp ./target/release/tui-notes /usr/local/bin/
 tui-notes
 ```
 
+if you encounter any build issues, try compiling the binary using this command:
+```bash
+cargo build --no-default-features
+```
+
 ## Configuration
 
 A default configuration file is created on the first start-up.\

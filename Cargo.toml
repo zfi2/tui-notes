@@ -19,4 +19,8 @@ zeroize = "1.7"
 rand = "0.8"
 base64 = "0.22"
 secrecy = "0.10"
-rfd = "0.15"
+rfd = { version = "0.15", optional = true }
+
+[features]
+default = ["native-dialogs"]
+native-dialogs = ["rfd"]

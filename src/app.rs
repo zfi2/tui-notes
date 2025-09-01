@@ -409,15 +409,16 @@ impl App {
         Ok(())
     }
 
-    fn handle_export_confirmation_input(&mut self, key: KeyEvent, config: &Config) -> io::Result<()> {
+    fn handle_export_confirmation_input(&mut self, key: KeyEvent, _config: &Config) -> io::Result<()> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                // Generate default filename with timestamp
+                // generate default filename with timestamp
                 let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
                 let default_filename = format!("notes_backup_{}.json", timestamp);
                 
-                if config.behavior.use_native_dialog {
-                    // Try to use native file dialog first
+#[cfg(feature = "native-dialogs")]
+                if _config.behavior.use_native_dialog {
+                    // try to use native file dialog first
                     match std::panic::catch_unwind(|| {
                         rfd::FileDialog::new()
                             .set_title("Export Notes Backup")
@@ -427,20 +428,20 @@ impl App {
                             .save_file()
                     }) {
                         Ok(Some(file_path)) => {
-                            // Native dialog succeeded and user selected a path
+                            // native dialog succeeded and user selected a path
                             if let Err(e) = self.note_manager.export_plaintext(&file_path) {
-                                // TODO: Show error message in UI
+                                // TODO: show error message in UI
                                 eprintln!("Export failed: {}", e);
                             }
                             self.mode = AppMode::NoteList;
                         }
                         Ok(None) => {
-                            // Native dialog succeeded but user cancelled
+                            // native dialog succeeded but user cancelled
                             self.mode = AppMode::NoteList;
                         }
                         Err(_) => {
-                            // Native dialog failed (e.g., no GUI, missing dependencies)
-                            // Fall back to terminal input with home directory as default
+                            // native dialog failed (e.g., no GUI, missing dependencies)
+                            // fall back to terminal input with home directory as default
                             self.mode = AppMode::SelectingExportLocation;
                             
                             let home_dir = dirs::home_dir()
@@ -451,7 +452,19 @@ impl App {
                         }
                     }
                 } else {
-                    // User prefers terminal dialog - go directly to terminal input
+                    // user prefers terminal dialog - go directly to terminal input
+                    self.mode = AppMode::SelectingExportLocation;
+                    
+                    let home_dir = dirs::home_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    let default_path = home_dir.join(&default_filename);
+                    self.export_file_input = default_path.to_string_lossy().to_string();
+                    self.export_cursor_position = self.export_file_input.len();
+                }
+                
+                #[cfg(not(feature = "native-dialogs"))]
+                {
+                    // native dialogs not compiled in - always use terminal input
                     self.mode = AppMode::SelectingExportLocation;
                     
                     let home_dir = dirs::home_dir()
@@ -474,7 +487,7 @@ impl App {
             KeyCode::Enter => {
                 if !self.export_file_input.trim().is_empty() {
                     if let Err(e) = self.note_manager.export_plaintext(&self.export_file_input) {
-                        // TODO: Show error message in UI
+                        // TODO: show error message in UI
                         eprintln!("Export failed: {}", e);
                     }
                     self.export_file_input.clear();

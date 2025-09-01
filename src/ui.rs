@@ -127,9 +127,16 @@ fn generate_help_text(app: &App, config: &Config) -> String {
             )
         }
         AppMode::ConfirmingExport => {
-            if config.behavior.use_native_dialog {
-                "Y/y: Confirm Export (native dialog, fallback to terminal) | N/n/Esc: Cancel".to_string()
-            } else {
+            #[cfg(feature = "native-dialogs")]
+            {
+                if config.behavior.use_native_dialog {
+                    "Y/y: Confirm Export (native dialog, fallback to terminal) | N/n/Esc: Cancel".to_string()
+                } else {
+                    "Y/y: Confirm Export (terminal dialog) | N/n/Esc: Cancel".to_string()
+                }
+            }
+            #[cfg(not(feature = "native-dialogs"))]
+            {
                 "Y/y: Confirm Export (terminal dialog) | N/n/Esc: Cancel".to_string()
             }
         }
@@ -884,10 +891,19 @@ fn draw_export_location_dialog(f: &mut Frame, area: Rect, app: &App, config: &Co
 
     f.render_widget(Clear, dialog_area);
 
-    let (title, subtitle) = if config.behavior.use_native_dialog {
-        ("Export Location (Fallback)", "(Native file dialog failed, using fallback)")
-    } else {
-        ("Export Location", "(Terminal mode - configured in settings)")
+    let (title, subtitle) = {
+        #[cfg(feature = "native-dialogs")]
+        {
+            if config.behavior.use_native_dialog {
+                ("Export Location (Fallback)", "(Native file dialog failed, using fallback)")
+            } else {
+                ("Export Location", "(Terminal mode - configured in settings)")
+            }
+        }
+        #[cfg(not(feature = "native-dialogs"))]
+        {
+            ("Export Location", "(Native dialogs not available in this build)")
+        }
     };
 
     let content = vec![
