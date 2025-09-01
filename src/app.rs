@@ -18,6 +18,7 @@ pub enum AppMode {
     CreatingNote,
     ConfirmingDelete,
     ConfirmingUnsavedExit,
+    ConfirmingExport,
     EncryptedFileWarning,
 }
 
@@ -144,10 +145,7 @@ impl App {
         if config.keybindings.export_plaintext.matches(key.code, key.modifiers) {
             match self.mode {
                 AppMode::NoteList => {
-                    if let Err(e) = self.export_plaintext_backup() {
-                        // TODO: Show error message in UI
-                        eprintln!("Export failed: {}", e);
-                    }
+                    self.mode = AppMode::ConfirmingExport;
                     return Ok(());
                 }
                 _ => {} // only allow export from note list
@@ -163,6 +161,7 @@ impl App {
             AppMode::EditingNote | AppMode::CreatingNote => self.handle_editor_input(key, config),
             AppMode::ConfirmingDelete => self.handle_delete_confirmation_input(key, config),
             AppMode::ConfirmingUnsavedExit => self.handle_unsaved_exit_confirmation_input(key, config),
+            AppMode::ConfirmingExport => self.handle_export_confirmation_input(key, config),
             AppMode::EncryptedFileWarning => self.handle_encrypted_file_warning_input(key, config),
         }
     }
@@ -404,6 +403,40 @@ impl App {
         Ok(())
     }
 
+    fn handle_export_confirmation_input(&mut self, key: KeyEvent, _config: &Config) -> io::Result<()> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.mode = AppMode::NoteList;
+                
+                // generate default filename with timestamp
+                let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+                let default_filename = format!("notes_backup_{}.json", timestamp);
+                
+                // try to use native file dialog or fall back to export with default name
+                if let Some(file_path) = rfd::FileDialog::new()
+                    .set_title("Export Notes Backup")
+                    .set_file_name(&default_filename)
+                    .add_filter("JSON files", &["json"])
+                    .add_filter("All files", &["*"])
+                    .save_file()
+                {
+                    if let Err(e) = self.note_manager.export_plaintext(&file_path) {
+                        // TODO: show error message in UI
+                        eprintln!("Export failed: {}", e);
+                    }
+                } else {
+                    // user cancelled the dialog - do nothing
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.mode = AppMode::NoteList;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+
     fn handle_editor_input(&mut self, key: KeyEvent, config: &Config) -> io::Result<()> {
         let kb = &config.keybindings;
         
@@ -455,7 +488,7 @@ impl App {
             
             if text_changed && config.behavior.auto_save && self.mode == AppMode::EditingNote && self.current_note_id.is_some() {
                 if let Err(_) = self.save_current_note() {
-                    // fuck it, if saving fails just keep typing
+                    // if saving fails just keep typing
                 }
             }
         }
@@ -690,9 +723,4 @@ impl App {
             .collect()
     }
 
-    fn export_plaintext_backup(&mut self) -> io::Result<()> {
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-        let export_filename = format!("notes_backup_{}.json", timestamp);
-        self.note_manager.export_plaintext(export_filename)
-    }
 }

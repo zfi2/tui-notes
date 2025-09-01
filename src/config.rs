@@ -196,8 +196,12 @@ impl Default for ColorTheme {
 
 impl Default for Behavior {
     fn default() -> Self {
+        let default_notes_file = Config::config_dir()
+            .map(|dir| dir.join("notes.json").to_string_lossy().to_string())
+            .unwrap_or_else(|_| "notes.json".to_string());
+
         Behavior {
-            default_notes_file: "notes.json".to_string(),
+            default_notes_file,
             auto_save: true,
             search_case_sensitive: false,
             confirm_delete: true,
@@ -333,7 +337,7 @@ impl Config {
         Ok(())
     }
 
-    fn config_path() -> io::Result<PathBuf> {
+    pub fn config_dir() -> io::Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .or_else(|| dirs::home_dir().map(|p| p.join(".config")))
             .ok_or_else(|| {
@@ -343,7 +347,11 @@ impl Config {
                 )
             })?;
 
-        Ok(config_dir.join("tui-notes").join("config.toml"))
+        Ok(config_dir.join("tui-notes"))
+    }
+
+    fn config_path() -> io::Result<PathBuf> {
+        Ok(Self::config_dir()?.join("config.toml"))
     }
 }
 

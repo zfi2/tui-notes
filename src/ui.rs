@@ -130,6 +130,9 @@ fn generate_help_text(app: &App, config: &Config) -> String {
                 format_keybinding_vec(&kb.cancel_exit)
             )
         }
+        AppMode::ConfirmingExport => {
+            "Y/y: Confirm Export (opens file dialog) | N/n/Esc: Cancel".to_string()
+        }
         AppMode::EncryptedFileWarning => {
             "Your notes file is encrypted, but encryption is disabled in config | Esc/q: Quit".to_string()
         }
@@ -210,6 +213,10 @@ pub fn draw(f: &mut Frame, app: &mut App, config: &Config) {
         AppMode::ConfirmingUnsavedExit => {
             draw_editor(f, chunks[1], app, config);
             draw_unsaved_changes_confirmation(f, f.area(), app, config);
+        }
+        AppMode::ConfirmingExport => {
+            draw_note_list(f, chunks[1], app, config);
+            draw_export_confirmation(f, f.area(), app, config);
         }
         AppMode::EncryptedFileWarning => {
             draw_encrypted_file_warning(f, chunks[1], app, config);
@@ -817,3 +824,41 @@ fn draw_encrypted_file_warning(f: &mut Frame, area: Rect, _app: &App, config: &C
 
     f.render_widget(dialog, dialog_area);
 }
+
+fn draw_export_confirmation(f: &mut Frame, area: Rect, _app: &App, config: &Config) {
+    let dialog_width = 70.min(area.width - 4);
+    let dialog_height = 9;
+    let dialog_x = (area.width.saturating_sub(dialog_width)) / 2;
+    let dialog_y = (area.height.saturating_sub(dialog_height)) / 2;
+    
+    let dialog_area = Rect {
+        x: dialog_x,
+        y: dialog_y,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    f.render_widget(Clear, dialog_area);
+
+    let warning_text = "⚠️  PLAINTEXT EXPORT WARNING  ⚠️\n\n\
+        You are about to export your notes in PLAINTEXT format.\n\
+        This will create an unencrypted backup file that anyone can read.\n\n\
+        Are you sure you want to continue?\n\n\
+        Press 'Y' to open file dialog and choose location\n\
+        Press 'N' to cancel";
+
+    let dialog = Paragraph::new(warning_text)
+        .style(Style::default().fg(config.colors.text.to_color()))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("Export Confirmation")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(config.colors.delete_dialog_border.to_color()).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(config.colors.delete_dialog_border.to_bg_color())),
+        )
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(dialog, dialog_area);
+}
+
