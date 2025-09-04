@@ -5,6 +5,9 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -290,6 +293,16 @@ fn is_reset(s: &str) -> bool {
 }
 
 
+// helper function to set secure permissions on unix systems
+#[cfg(unix)]
+fn set_secure_permissions(path: &std::path::Path, is_directory: bool) -> io::Result<()> {
+    let mode = if is_directory { 0o700 } else { 0o600 };
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_mode(mode);
+    fs::set_permissions(path, perms)?;
+    Ok(())
+}
+
 impl Config {
     pub fn load() -> io::Result<Self> {
         let config_path = Self::config_path()?;
@@ -326,6 +339,8 @@ impl Config {
         
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
+            // set secure permissions on the config directory
+            set_secure_permissions(parent, true)?;
         }
 
         let contents = toml::to_string_pretty(self).map_err(|e| {
@@ -336,6 +351,8 @@ impl Config {
         })?;
 
         fs::write(&config_path, contents)?;
+        // set secure permissions on the config file
+        set_secure_permissions(&config_path, false)?;
         Ok(())
     }
 

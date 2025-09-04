@@ -3,6 +3,7 @@ use std::io;
 use std::path::Path;
 use crate::config::{Config, key_matches_any};
 use crate::note::{Note, NoteManager};
+use crate::encryption::MAX_PASSWORD_LENGTH;
 use tui_textarea::TextArea;
 use secrecy::{SecretString, ExposeSecret};
 use chrono::Utc;
@@ -19,6 +20,7 @@ pub enum AppMode {
     ConfirmingDelete,
     ConfirmingUnsavedExit,
     ConfirmingExport,
+    ReauthenticatingForExport,
     SelectingExportLocation,
     EncryptedFileWarning,
 }
@@ -167,6 +169,7 @@ impl App {
             AppMode::ConfirmingDelete => self.handle_delete_confirmation_input(key, config),
             AppMode::ConfirmingUnsavedExit => self.handle_unsaved_exit_confirmation_input(key, config),
             AppMode::ConfirmingExport => self.handle_export_confirmation_input(key, config),
+            AppMode::ReauthenticatingForExport => self.handle_reauthentication_input(key, config),
             AppMode::SelectingExportLocation => self.handle_export_location_input(key, config),
             AppMode::EncryptedFileWarning => self.handle_encrypted_file_warning_input(key, config),
         }
@@ -195,22 +198,25 @@ impl App {
                 self.should_quit = true;
             }
             KeyCode::Backspace => {
-                let mut temp = self.password_input.expose_secret().to_string();
-                temp.pop();
-                self.password_input = SecretString::new(temp.into());
+                if !self.password_input.expose_secret().is_empty() {
+                    let secret_chars: Vec<char> = self.password_input.expose_secret().chars().collect();
+                    let char_count = secret_chars.len();
+                    let new_chars: Vec<char> = secret_chars.into_iter().take(char_count - 1).collect();
+                    self.password_input = SecretString::new(new_chars.into_iter().collect());
+                }
                 self.password_error = None;
                 self.password_limit_reached = false;
             }
             KeyCode::Char(c) => {
-                if self.password_input.expose_secret().len() < 64 {
-                    let mut temp = self.password_input.expose_secret().to_string();
-                    temp.push(c);
-                    self.password_input = SecretString::new(temp.into());
-                    self.password_error = None;
-                    self.password_limit_reached = self.password_input.expose_secret().len() >= 64;
+                if self.password_input.expose_secret().len() < MAX_PASSWORD_LENGTH {
+                    let mut new_secret_str = self.password_input.expose_secret().to_string();
+                    new_secret_str.push(c);
+                    self.password_input = SecretString::new(new_secret_str.into());
+                    self.password_limit_reached = self.password_input.expose_secret().len() >= MAX_PASSWORD_LENGTH;
                 } else {
                     self.password_limit_reached = true;
                 }
+                self.password_error = None;
             }
             _ => {}
         }
@@ -240,22 +246,25 @@ impl App {
                 self.should_quit = true;
             }
             KeyCode::Backspace => {
-                let mut temp = self.password_input.expose_secret().to_string();
-                temp.pop();
-                self.password_input = SecretString::new(temp.into());
+                if !self.password_input.expose_secret().is_empty() {
+                    let secret_chars: Vec<char> = self.password_input.expose_secret().chars().collect();
+                    let char_count = secret_chars.len();
+                    let new_chars: Vec<char> = secret_chars.into_iter().take(char_count - 1).collect();
+                    self.password_input = SecretString::new(new_chars.into_iter().collect());
+                }
                 self.password_error = None;
                 self.password_limit_reached = false;
             }
             KeyCode::Char(c) => {
-                if self.password_input.expose_secret().len() < 64 {
-                    let mut temp = self.password_input.expose_secret().to_string();
-                    temp.push(c);
-                    self.password_input = SecretString::new(temp.into());
-                    self.password_error = None;
-                    self.password_limit_reached = self.password_input.expose_secret().len() >= 64;
+                if self.password_input.expose_secret().len() < MAX_PASSWORD_LENGTH {
+                    let mut new_secret_str = self.password_input.expose_secret().to_string();
+                    new_secret_str.push(c);
+                    self.password_input = SecretString::new(new_secret_str.into());
+                    self.password_limit_reached = self.password_input.expose_secret().len() >= MAX_PASSWORD_LENGTH;
                 } else {
                     self.password_limit_reached = true;
                 }
+                self.password_error = None;
             }
             _ => {}
         }
@@ -412,70 +421,127 @@ impl App {
     fn handle_export_confirmation_input(&mut self, key: KeyEvent, _config: &Config) -> io::Result<()> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                // generate default filename with timestamp
-                let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-                let default_filename = format!("notes_backup_{}.json", timestamp);
-                
-#[cfg(feature = "native-dialogs")]
-                if _config.behavior.use_native_dialog {
-                    // try to use native file dialog first
-                    match std::panic::catch_unwind(|| {
-                        rfd::FileDialog::new()
-                            .set_title("Export Notes Backup")
-                            .set_file_name(&default_filename)
-                            .add_filter("JSON files", &["json"])
-                            .add_filter("All files", &["*"])
-                            .save_file()
-                    }) {
-                        Ok(Some(file_path)) => {
-                            // native dialog succeeded and user selected a path
-                            if let Err(e) = self.note_manager.export_plaintext(&file_path) {
-                                // TODO: show error message in UI
-                                eprintln!("Export failed: {}", e);
-                            }
-                            self.mode = AppMode::NoteList;
-                        }
-                        Ok(None) => {
-                            // native dialog succeeded but user cancelled
-                            self.mode = AppMode::NoteList;
-                        }
-                        Err(_) => {
-                            // native dialog failed (e.g., no GUI, missing dependencies)
-                            // fall back to terminal input with home directory as default
-                            self.mode = AppMode::SelectingExportLocation;
-                            
-                            let home_dir = dirs::home_dir()
-                                .unwrap_or_else(|| std::path::PathBuf::from("."));
-                            let default_path = home_dir.join(&default_filename);
-                            self.export_file_input = default_path.to_string_lossy().to_string();
-                            self.export_cursor_position = self.export_file_input.len();
-                        }
-                    }
-                } else {
-                    // user prefers terminal dialog - go directly to terminal input
-                    self.mode = AppMode::SelectingExportLocation;
-                    
-                    let home_dir = dirs::home_dir()
-                        .unwrap_or_else(|| std::path::PathBuf::from("."));
-                    let default_path = home_dir.join(&default_filename);
-                    self.export_file_input = default_path.to_string_lossy().to_string();
-                    self.export_cursor_position = self.export_file_input.len();
-                }
-                
-                #[cfg(not(feature = "native-dialogs"))]
-                {
-                    // native dialogs not compiled in - always use terminal input
-                    self.mode = AppMode::SelectingExportLocation;
-                    
-                    let home_dir = dirs::home_dir()
-                        .unwrap_or_else(|| std::path::PathBuf::from("."));
-                    let default_path = home_dir.join(&default_filename);
-                    self.export_file_input = default_path.to_string_lossy().to_string();
-                    self.export_cursor_position = self.export_file_input.len();
-                }
+                // require re-authentication before proceeding with export
+                self.mode = AppMode::ReauthenticatingForExport;
+                self.password_input = SecretString::new("".into());
+                self.password_error = None;
+                self.password_limit_reached = false;
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 self.mode = AppMode::NoteList;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_reauthentication_input(&mut self, key: KeyEvent, config: &Config) -> io::Result<()> {
+        use crossterm::event::KeyCode;
+        
+        match key.code {
+            KeyCode::Enter => {
+                if !self.password_input.expose_secret().is_empty() {
+                    // verify the password by attempting to decrypt
+                    match self.note_manager.verify_password(self.password_input.expose_secret()) {
+                        Ok(()) => {
+                            // password is correct, proceed with export
+                            self.password_input = SecretString::new("".into());
+                            self.password_error = None;
+                            
+                            // generate default filename with timestamp
+                            let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+                            let default_filename = format!("notes_backup_{}.json", timestamp);
+                            
+                            #[cfg(feature = "native-dialogs")]
+                            if config.behavior.use_native_dialog {
+                                // try to use native file dialog first
+                                match std::panic::catch_unwind(|| {
+                                    rfd::FileDialog::new()
+                                        .set_title("Export Notes Backup")
+                                        .set_file_name(&default_filename)
+                                        .add_filter("JSON files", &["json"])
+                                        .add_filter("All files", &["*"])
+                                        .save_file()
+                                }) {
+                                    Ok(Some(file_path)) => {
+                                        // native dialog succeeded and user selected a path
+                                        if let Err(e) = self.note_manager.export_plaintext(&file_path) {
+                                            // TODO: show error message in UI
+                                            eprintln!("Export failed: {}", e);
+                                        }
+                                        self.mode = AppMode::NoteList;
+                                    }
+                                    Ok(None) => {
+                                        // native dialog succeeded but user cancelled
+                                        self.mode = AppMode::NoteList;
+                                    }
+                                    Err(_) => {
+                                        // native dialog failed (e.g., no GUI, missing dependencies)
+                                        // fall back to terminal input with home directory as default
+                                        self.mode = AppMode::SelectingExportLocation;
+                                        
+                                        let home_dir = dirs::home_dir()
+                                            .unwrap_or_else(|| std::path::PathBuf::from("."));
+                                        let default_path = home_dir.join(&default_filename);
+                                        self.export_file_input = default_path.to_string_lossy().to_string();
+                                        self.export_cursor_position = self.export_file_input.len();
+                                    }
+                                }
+                            } else {
+                                // user prefers terminal dialog - go directly to terminal input
+                                self.mode = AppMode::SelectingExportLocation;
+                                
+                                let home_dir = dirs::home_dir()
+                                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                                let default_path = home_dir.join(&default_filename);
+                                self.export_file_input = default_path.to_string_lossy().to_string();
+                                self.export_cursor_position = self.export_file_input.len();
+                            }
+                            
+                            #[cfg(not(feature = "native-dialogs"))]
+                            {
+                                // native dialogs not compiled in - always use terminal input
+                                self.mode = AppMode::SelectingExportLocation;
+                                
+                                let home_dir = dirs::home_dir()
+                                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                                let default_path = home_dir.join(&default_filename);
+                                self.export_file_input = default_path.to_string_lossy().to_string();
+                                self.export_cursor_position = self.export_file_input.len();
+                            }
+                        }
+                        Err(_) => {
+                            self.password_error = Some("Invalid password or corrupted data".to_string());
+                            self.password_input = SecretString::new("".into());
+                        }
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                self.mode = AppMode::NoteList;
+                self.password_input = SecretString::new("".into());
+                self.password_error = None;
+            }
+            KeyCode::Backspace => {
+                if !self.password_input.expose_secret().is_empty() {
+                    let secret_chars: Vec<char> = self.password_input.expose_secret().chars().collect();
+                    let char_count = secret_chars.len();
+                    let new_chars: Vec<char> = secret_chars.into_iter().take(char_count - 1).collect();
+                    self.password_input = SecretString::new(new_chars.into_iter().collect());
+                }
+                self.password_error = None;
+                self.password_limit_reached = false;
+            }
+            KeyCode::Char(c) => {
+                if self.password_input.expose_secret().len() < MAX_PASSWORD_LENGTH {
+                    let mut new_secret_str = self.password_input.expose_secret().to_string();
+                    new_secret_str.push(c);
+                    self.password_input = SecretString::new(new_secret_str.into());
+                    self.password_limit_reached = self.password_input.expose_secret().len() >= MAX_PASSWORD_LENGTH;
+                } else {
+                    self.password_limit_reached = true;
+                }
+                self.password_error = None;
             }
             _ => {}
         }

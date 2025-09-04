@@ -5,8 +5,21 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use uuid::Uuid;
-use crate::encryption::{EncryptionManager, EncryptedFile};
+use crate::encryption::{EncryptionManager, EncryptedFile, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH};
 use base64::Engine;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+// helper function to set secure permissions on unix systems
+#[cfg(unix)]
+fn set_secure_permissions(path: &std::path::Path, is_directory: bool) -> io::Result<()> {
+    let mode = if is_directory { 0o700 } else { 0o600 };
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_mode(mode);
+    fs::set_permissions(path, perms)?;
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
@@ -86,10 +99,10 @@ impl NoteManager {
         }
 
         // validate password on our end too for defense in depth
-        if password.len() < 8 {
+        if password.len() < MIN_PASSWORD_LENGTH {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "password too short"));
         }
-        if password.len() > 256 {
+        if password.len() > MAX_PASSWORD_LENGTH {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "password too long"));
         }
 
@@ -145,6 +158,53 @@ impl NoteManager {
         } else {
             true
         }
+    }
+
+    // verify password without affecting the current encryption state
+    pub fn verify_password(&self, password: &str) -> io::Result<()> {
+        if !self.encryption_enabled {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "encryption not enabled"));
+        }
+
+        // validate password length
+        if password.len() < MIN_PASSWORD_LENGTH {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid password or corrupted data"));
+        }
+        if password.len() > MAX_PASSWORD_LENGTH {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid password or corrupted data"));
+        }
+
+        // if no file exists, we can't verify against anything
+        if !self.notes_file.exists() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid password or corrupted data"));
+        }
+
+        let content = fs::read_to_string(&self.notes_file).map_err(|_| {
+            io::Error::new(io::ErrorKind::PermissionDenied, "invalid password or corrupted data")
+        })?;
+
+        if !EncryptionManager::is_file_encrypted(&content) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid password or corrupted data"));
+        }
+
+        let encrypted: EncryptedFile = serde_json::from_str(&content).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "invalid password or corrupted data")
+        })?;
+        
+        let salt = base64::engine::general_purpose::STANDARD.decode(&encrypted.salt).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "invalid password or corrupted data")
+        })?;
+
+        if salt.len() != 16 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid password or corrupted data"));
+        }
+
+        // create a temporary encryption manager to test the password
+        let mut temp_encryption = EncryptionManager::new();
+        temp_encryption.unlock(password, &salt)?;
+        temp_encryption.decrypt(&encrypted)?;
+        
+        Ok(())
     }
 
 
@@ -226,6 +286,14 @@ impl NoteManager {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "notes manager is not ready"));
         }
 
+        // Ensure parent directory exists and has secure permissions
+        if let Some(parent) = self.notes_file.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+                set_secure_permissions(parent, true)?;
+            }
+        }
+
         let json = serde_json::to_string_pretty(&self.notes)?;
         
         if self.encryption_enabled {
@@ -238,6 +306,9 @@ impl NoteManager {
         } else {
             fs::write(&self.notes_file, json)?;
         }
+        
+        // set secure permissions on the notes file
+        set_secure_permissions(&self.notes_file, false)?;
         Ok(())
     }
 
@@ -249,14 +320,17 @@ impl NoteManager {
         let json = serde_json::to_string_pretty(&self.notes)?;
         let export_path = export_file.into();
         
-        // ensure parent directory exists
+        // ensure parent directory exists and has secure permissions
         if let Some(parent) = export_path.parent() {
             if !parent.exists() {
                 fs::create_dir_all(parent)?;
+                set_secure_permissions(parent, true)?;
             }
         }
         
         fs::write(&export_path, json)?;
+        // set secure permissions on the export file
+        set_secure_permissions(&export_path, false)?;
         Ok(())
     }
 

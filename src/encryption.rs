@@ -7,29 +7,13 @@ use chacha20poly1305::{
 use argon2::{Argon2, PasswordHasher, password_hash::{rand_core::RngCore, SaltString}};
 use zeroize::Zeroize;
 use base64::{Engine as _, engine::general_purpose};
+use subtle::ConstantTimeEq;
 
-const MIN_PASSWORD_LENGTH: usize = 8;
-const MAX_PASSWORD_LENGTH: usize = 256;
+pub const MIN_PASSWORD_LENGTH: usize = 8;
+pub const MAX_PASSWORD_LENGTH: usize = 256;
 const MAX_CONTENT_SIZE: usize = 100 * 1024 * 1024; // 100MB limit
 
 const MAGIC_HEADER: &str = "ENCRYPTED_NOTES";
-
-// constant time comparison to prevent timing attacks
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    let max_len = a.len().max(b.len());
-    let mut result = 0u8;
-    
-    // check length equality in constant time by comparing all positions
-    for i in 0..max_len {
-        let a_byte = a.get(i).unwrap_or(&0);
-        let b_byte = b.get(i).unwrap_or(&0);
-        result |= a_byte ^ b_byte;
-    }
-    
-    // also compare lengths in constant time
-    result |= (a.len() ^ b.len()) as u8;
-    result == 0
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedFile {
@@ -166,7 +150,7 @@ impl EncryptionManager {
         })?;
 
         // constant time comparison to prevent timing attacks
-        if !constant_time_eq(encrypted.magic.as_bytes(), MAGIC_HEADER.as_bytes()) {
+        if !bool::from(encrypted.magic.as_bytes().ct_eq(MAGIC_HEADER.as_bytes())) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid format"));
         }
 

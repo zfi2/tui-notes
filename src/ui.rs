@@ -140,6 +140,9 @@ fn generate_help_text(app: &App, config: &Config) -> String {
                 "Y/y: Confirm Export (terminal dialog) | N/n/Esc: Cancel".to_string()
             }
         }
+        AppMode::ReauthenticatingForExport => {
+            "Re-enter password to authorize plaintext export | Esc: Cancel".to_string()
+        }
         AppMode::SelectingExportLocation => {
             "Type file path for backup export | Enter: Export | Esc: Cancel | ←/→: Move cursor | Home/End: Jump".to_string()
         }
@@ -227,6 +230,9 @@ pub fn draw(f: &mut Frame, app: &mut App, config: &Config) {
         AppMode::ConfirmingExport => {
             draw_note_list(f, chunks[1], app, config);
             draw_export_confirmation(f, f.area(), app, config);
+        }
+        AppMode::ReauthenticatingForExport => {
+            draw_reauthentication_prompt(f, chunks[1], app, config);
         }
         AppMode::SelectingExportLocation => {
             draw_note_list(f, chunks[1], app, config);
@@ -593,8 +599,9 @@ fn draw_delete_confirmation(f: &mut Frame, area: Rect, app: &App, config: &Confi
     f.render_widget(Clear, dialog_area);
 
     let note_title = &app.delete_note_title;
-    let truncated_title = if note_title.len() > 40 {
-        format!("{}...", &note_title[..37])
+    let truncated_title = if note_title.chars().count() > 40 {
+        let safe_title: String = note_title.chars().take(37).collect();
+        format!("{}...", safe_title)
     } else {
         note_title.clone()
     };
@@ -703,7 +710,7 @@ fn draw_password_prompt(f: &mut Frame, area: Rect, app: &App, config: &Config) {
     } else if app.password_limit_reached {
         content.push(Line::from(""));
         content.push(Line::from(vec![
-            Span::styled("Maximum password length reached (64 characters)", 
+            Span::styled("Maximum password length reached (256 characters)", 
                 Style::default().fg(config.colors.delete_dialog_border.to_color())),
         ]).alignment(Alignment::Center));
     }
@@ -758,7 +765,7 @@ fn draw_password_setup(f: &mut Frame, area: Rect, app: &App, config: &Config) {
 
     let mut content = vec![
         Line::from("Create a password for your new encrypted notes vault.").alignment(Alignment::Center),
-        Line::from("The password must be 8-64 characters long.").alignment(Alignment::Center),
+        Line::from("The password must be 8-256 characters long.").alignment(Alignment::Center),
         Line::from(""),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(config.colors.text.to_color())),
@@ -775,7 +782,79 @@ fn draw_password_setup(f: &mut Frame, area: Rect, app: &App, config: &Config) {
     } else if app.password_limit_reached {
         content.push(Line::from(""));
         content.push(Line::from(vec![
-            Span::styled("Maximum password length reached (64 characters)", 
+            Span::styled("Maximum password length reached (256 characters)", 
+                Style::default().fg(config.colors.delete_dialog_border.to_color())),
+        ]).alignment(Alignment::Center));
+    }
+
+    let password_block = Paragraph::new(content)
+        .style(Style::default().fg(config.colors.text.to_color()))
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(if app.password_error.is_some() {
+                    Style::default().fg(config.colors.delete_dialog_border.to_color())
+                } else {
+                    Style::default().fg(config.colors.border_active.to_color())
+                }),
+        );
+
+    f.render_widget(password_block, password_area[1]);
+
+    let cursor_x = password_area[1].x + 3 + app.password_input.expose_secret().len() as u16;
+    let cursor_y = password_area[1].y + 4;
+    f.set_cursor_position((cursor_x, cursor_y));
+}
+
+fn draw_reauthentication_prompt(f: &mut Frame, area: Rect, app: &App, config: &Config) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(8),
+            Constraint::Min(0),
+        ])
+        .split(area);
+
+    let password_area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(70),
+            Constraint::Min(0),
+        ])
+        .split(chunks[1]);
+
+    let password_display = "*".repeat(app.password_input.expose_secret().len());
+    
+    let title = if app.password_error.is_some() {
+        "🔐 Re-authentication Required (Error)"
+    } else {
+        "🔐 Re-authentication Required"
+    };
+
+    let mut content = vec![
+        Line::from("Enter your password to authorize plaintext export:").alignment(Alignment::Center),
+        Line::from("This will create an unencrypted backup file.").alignment(Alignment::Center),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(config.colors.text.to_color())),
+            Span::styled(password_display, Style::default().fg(config.colors.text.to_color())),
+        ]),
+    ];
+
+    if let Some(error) = &app.password_error {
+        content.push(Line::from(""));
+        content.push(Line::from(vec![
+            Span::styled("Error: ", Style::default().fg(config.colors.delete_dialog_border.to_color())),
+            Span::styled(error, Style::default().fg(config.colors.delete_dialog_border.to_color())),
+        ]).alignment(Alignment::Center));
+    } else if app.password_limit_reached {
+        content.push(Line::from(""));
+        content.push(Line::from(vec![
+            Span::styled("Maximum password length reached (256 characters)", 
                 Style::default().fg(config.colors.delete_dialog_border.to_color())),
         ]).alignment(Alignment::Center));
     }

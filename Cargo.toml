@@ -19,6 +19,7 @@ zeroize = "1.7"
 rand = "0.8"
 base64 = "0.22"
 secrecy = "0.10"
+subtle = "2.5"
 rfd = { version = "0.15", optional = true }
 
 [features]
